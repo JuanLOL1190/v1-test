@@ -1,14 +1,15 @@
 import streamlit as st
 import numpy as np
-import scipy.stats as stats
-import matplotlib.pyplot as plt
+import pandas as pd
+from scipy import stats
+from math import sqrt, ceil
 
 # Funciones estadísticas auxiliares
 def calc_media(data):
-    return np.mean(data)
+    return sum(data) / len(data)
 
 def calc_varianza(data, media):
-    return np.var(data, ddof=1)
+    return sum([(x - media) ** 2 for x in data]) / (len(data) - 1)
 
 def calc_desviacion(varianza):
     return np.sqrt(varianza)
@@ -27,62 +28,109 @@ def get_t_value(confianza, gl):
     }
     gls = [10, 20, 30, 50, 100, 1000]
     closest = min(gls, key=lambda x: abs(x - gl))
-    return t_table.get(confianza, {}).get(closest, 1.96)
+    return t_table[confianza].get(closest, 1.96)
 
 # Función para calcular probabilidad normal estándar (aproximación)
 def normal_cdf(z):
-    return stats.norm.cdf(z)
+    a1, a2, a3, a4, a5 = 0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429
+    p = 0.3275911
+    sign = -1 if z < 0 else 1
+    z = abs(z) / np.sqrt(2)
+    t = 1.0 / (1.0 + p * z)
+    y = 1.0 - ((((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t) * np.exp(-z * z)
+    return 0.5 * (1.0 + sign * y)
 
-# Streamlit UI
-st.title('Calculadora Estadística')
-
-# Pestañas
-tabs = st.selectbox('Selecciona una pestaña:', ['Datos', 'Estadísticos', 'Inferencia'])
-
-# Sección de Datos
-if tabs == 'Datos':
-    st.header('Ingreso de Datos')
-    data_input = st.text_area('Introduce los datos (separados por coma)', '10, 20, 15, 30, 25')
-
-    if st.button('Cargar Datos'):
+# Función para cargar datos y mostrar estadísticos
+def cargar_datos():
+    data_input = st.text_area("Ingresa tus datos", placeholder="Ejemplo: 10, 20, 30, 40", height=100)
+    if st.button("Cargar Datos"):
         try:
-            datos = list(map(float, data_input.split(',')))
-            st.success(f'Datos cargados correctamente: {datos}')
-        except:
-            st.error('Error al procesar los datos')
+            datos = [float(x.strip()) for x in data_input.split(',') if x.strip().replace('.', '', 1).isdigit()]
+            if len(datos) == 0:
+                raise ValueError("Datos no válidos.")
+            st.session_state.datos = datos
+            st.success(f"Datos cargados correctamente: {len(datos)} elementos")
+            return datos
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+            return None
 
-# Sección de Estadísticos
-elif tabs == 'Estadísticos':
-    st.header('Cálculo de Estadísticos')
-    if 'datos' in locals():
-        media = calc_media(datos)
-        varianza = calc_varianza(datos, media)
-        desviacion = calc_desviacion(varianza)
+# Calculando estadísticos
+def calcular_estadisticos(datos):
+    media = calc_media(datos)
+    varianza = calc_varianza(datos, media)
+    desviacion = calc_desviacion(varianza)
+    return media, varianza, desviacion
 
-        st.write(f"**Media:** {media}")
-        st.write(f"**Varianza:** {varianza}")
-        st.write(f"**Desviación estándar:** {desviacion}")
-        
-        # Histograma
-        fig, ax = plt.subplots()
-        ax.hist(datos, bins=10, color='blue', edgecolor='black')
-        st.pyplot(fig)
-    else:
-        st.error('Primero ingresa los datos en la pestaña "Datos"')
+# Mostrar los resultados
+def mostrar_estadisticos(estadisticos):
+    media, varianza, desviacion = estadisticos
+    st.write(f"**Media:** {media:.2f}")
+    st.write(f"**Varianza:** {varianza:.2f}")
+    st.write(f"**Desviación estándar:** {desviacion:.2f}")
 
-# Sección de Inferencia
-elif tabs == 'Inferencia':
-    st.header('Intervalo de Confianza')
+# Función para el cálculo del intervalo de confianza para la media
+def calcular_ic_media(datos, nivel_confianza):
+    media, varianza, desviacion = calcular_estadisticos(datos)
+    n = len(datos)
+    z = get_z_value(nivel_confianza)
+    error_z = z * (desviacion / sqrt(n))
+    return (media - error_z, media + error_z, error_z)
+
+# Función para el cálculo del intervalo de confianza para proporciones
+def calcular_ic_proporcion(p, n, nivel_confianza):
+    z = get_z_value(nivel_confianza)
+    error = z * sqrt((p * (1 - p)) / n)
+    return (max(0, p - error), min(1, p + error), error)
+
+# Tamaño de muestra para media
+def calcular_tamano_muestra_media(error_deseado, desviacion_poblacional, nivel_confianza):
+    z = get_z_value(nivel_confianza)
+    return ceil(((z * desviacion_poblacional) / error_deseado) ** 2)
+
+# Tamaño de muestra para proporción
+def calcular_tamano_muestra_proporcion(error_deseado, proporcion_estimada, nivel_confianza):
+    z = get_z_value(nivel_confianza)
+    return ceil(((z ** 2) * proporcion_estimada * (1 - proporcion_estimada)) / (error_deseado ** 2))
+
+# Interfaz de Streamlit
+def main():
+    st.title("Calculadora Estadística Completa")
     
-    confianza = st.selectbox('Selecciona nivel de confianza', ['0.90', '0.95', '0.99'])
-    if 'datos' in locals():
-        z_value = get_z_value(confianza)
-        media = calc_media(datos)
-        desviacion = calc_desviacion(calc_varianza(datos, media))
-        error_z = z_value * (desviacion / np.sqrt(len(datos)))
+    # Sección de Cargar Datos
+    datos = cargar_datos()
+    
+    if datos:
+        # Mostrar estadísticas descriptivas
+        estadisticos = calcular_estadisticos(datos)
+        mostrar_estadisticos(estadisticos)
         
-        st.write(f"**Valor Z:** {z_value}")
-        st.write(f"**Error estándar (Z):** {error_z}")
-        st.write(f"**Intervalo de Confianza (Z):** ({media - error_z}, {media + error_z})")
-    else:
-        st.error('Primero ingresa los datos en la pestaña "Datos"')
+        # Intervalo de Confianza para la Media
+        nivel_confianza = st.selectbox("Nivel de Confianza", ["0.90", "0.95", "0.99"])
+        ic_media = calcular_ic_media(datos, nivel_confianza)
+        st.write(f"**Intervalo de Confianza para la Media:** ({ic_media[0]:.2f}, {ic_media[1]:.2f}), Error: ±{ic_media[2]:.2f}")
+        
+        # Tamaño de Muestra para Media
+        error_deseado = st.number_input("Error deseado (E) para la Media", min_value=0.01)
+        desviacion_poblacional = st.number_input("Desviación poblacional (σ)", min_value=0.01)
+        if error_deseado > 0 and desviacion_poblacional > 0:
+            tamano_muestra_media = calcular_tamano_muestra_media(error_deseado, desviacion_poblacional, nivel_confianza)
+            st.write(f"Tamaño de muestra necesario para la media: {tamano_muestra_media}")
+        
+        # Intervalo de Confianza para Proporción
+        p = st.number_input("Proporción estimada (p̂)", min_value=0.0, max_value=1.0, step=0.01, value=0.5)
+        n = st.number_input("Tamaño de la muestra (n)", min_value=1, step=1)
+        if p and n:
+            ic_proporcion = calcular_ic_proporcion(p, n, nivel_confianza)
+            st.write(f"**Intervalo de Confianza para Proporción:** ({ic_proporcion[0]:.2f}, {ic_proporcion[1]:.2f}), Error: ±{ic_proporcion[2]:.2f}")
+        
+        # Tamaño de Muestra para Proporción
+        error_deseado_proporcion = st.number_input("Error deseado (E) para Proporción", min_value=0.01)
+        proporcion_estimada = st.number_input("Proporción estimada para Proporción", min_value=0.0, max_value=1.0, step=0.01, value=0.5)
+        if error_deseado_proporcion > 0:
+            tamano_muestra_proporcion = calcular_tamano_muestra_proporcion(error_deseado_proporcion, proporcion_estimada, nivel_confianza)
+            st.write(f"Tamaño de muestra necesario para la proporción: {tamano_muestra_proporcion}")
+
+if __name__ == "__main__":
+    main()
+
