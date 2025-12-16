@@ -2,7 +2,6 @@ import streamlit as st
 import numpy as np
 import scipy.stats as stats
 import matplotlib.pyplot as plt
-from scipy import stats
 
 # Funciones estadísticas auxiliares
 def calc_media(data):
@@ -87,4 +86,3 @@ elif tabs == 'Inferencia':
         st.write(f"**Intervalo de Confianza (Z):** ({media - error_z}, {media + error_z})")
     else:
         st.error('Primero ingresa los datos en la pestaña "Datos"')
-
